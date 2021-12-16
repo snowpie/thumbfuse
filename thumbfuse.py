@@ -13,6 +13,7 @@ import io
 from fuse import FUSE, FuseOSError, Operations
 from PIL import Image
 from pymemcache.client import base
+from random import randrange
 
 memcacheclient = base.Client(('127.0.0.1', 11211))
 
@@ -123,14 +124,14 @@ class Passthrough(Operations):
 
     def open(self, path, flags):
         full_path = self._full_path(path)
-        width=800
-        height=600
-        objkey=(full_path+":"+str(width)+":"+str(height)).replace(" ","+")
-        fhkey=("fh"+full_path+":"+str(width)+":"+str(height)).replace(" ","+")
-        imagebytearray=memcacheclient.get(key)
-        fh=memcacheclient.get(fhkey)
+        width=640
+        height=480
+        objkey=path # +":"+str(width)+":"+str(height)).replace(" ","+")
+
+        imagebytearray=memcacheclient.get(objkey)
+
         if imagebytearray is None:
-            print(" -- UNCACHED "+key)
+            print(" -- UNCACHED "+objkey)
             if (os.path.isfile(full_path) and os.path.splitext(full_path)[1].lower() in self.imageformats):
                 print(full_path + " is an image to be scaled")
 
@@ -140,12 +141,11 @@ class Passthrough(Operations):
                 ## https://stackoverflow.com/questions/42800250/difference-between-open-and-io-bytesio-in-binary-streams
                 ## https://docs.python.org/3/library/io.html
                 imageIO=self.image_to_byte_array(newimage)
-                imagebytearray=imageIo.getvalue()
-                memcacheclient.set(key,imagebytearray)
+                imagebytearray=imageIO.getvalue()
+                memcacheclient.set(objkey,imagebytearray)
         else:
             print(" -- CACHE HIT")
-            imageIO=io.BytesIO(imagebytearray)
-        return imageIO
+        return randrange(1,1000000)
 
     def create(self, path, mode, fi=None):
         raise FuseOSError(errno.EROFS)
@@ -153,8 +153,14 @@ class Passthrough(Operations):
         return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
 
     def read(self, path, length, offset, fh):
-        os.lseek(fh, offset, os.SEEK_SET)
-        return os.read(fh, length)
+        print(fh)
+        imagebytearray=memcacheclient.get(path)
+        return imagebytearray[offset:(offset+length)]
+
+    #    fh2 = io.BytesIO(imagebytearray)
+
+    #    os.lseek(fh2, offset, os.SEEK_SET)
+#        return os.read(fh, length)
 
     def write(self, path, buf, offset, fh):
         raise FuseOSError(errno.EROFS)
@@ -171,6 +177,7 @@ class Passthrough(Operations):
         return os.fsync(fh)
 
     def release(self, path, fh):
+        return 0
         return os.close(fh)
 
     def fsync(self, path, fdatasync, fh):
