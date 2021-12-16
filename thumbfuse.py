@@ -8,9 +8,13 @@ import errno
 import PIL
 import glob
 import re
+import io
 
 from fuse import FUSE, FuseOSError, Operations
 from PIL import Image
+from pymemcache.client import base
+
+memcacheclient = base.Client(('127.0.0.1', 11211))
 
 
 
@@ -18,44 +22,28 @@ class Passthrough(Operations):
     def __init__(self, root):
         self.root = root
         self.imageformats = [".jpg",".jpeg"]
-        self.pattern = re.compile("^.scaled.[0-9]{0,5}.[0-9]{0,5}")
 
     # Helpers
     # =======
 
     def _full_path(self, partial):
         partial = partial.lstrip("/")
-        if self._isscalepath(partial):
-            partial=partial.split('/')[1:]
         path = os.path.join(self.root, partial)
         return path
 
-    def _isscalepath(self,path):
-        # if the path starts with .scaled.xxx.yyy/ then we scale any images beneath
-        # to width=xxx height=yyy
-
-        # are we in a scale path?
-
-        # if so, write this.h , this.w after bounds checking
-
-        # Return true or false acordingly
-        ## [w,h]=_getscale(full_path)
-        print("Checking path: "+ path)
-        if (self.pattern.match(path)):
-            print("Magic path: "+ path)
-            return True
-        return False
-    def _stripscalepath(self,path):
-        ## remove the .scaled.* bit if present
-        return path
-
+    def image_to_byte_array(self,image:Image):
+      imgByteArr = io.BytesIO()
+      # image.save(imgByteArr, format=image.format)
+      image.save(imgByteArr, format='jpeg')
+      #imgByteArr = imgByteArr.getvalue()
+      return imgByteArr
 
     # Filesystem methods
     # ==================
 
     def access(self, path, mode):
         full_path = self._full_path(path)
-        if not os.access(self._stripscalepath(full_path, mode)):
+        if not os.access(full_path, mode):
             raise FuseOSError(errno.EACCES)
 
     def chmod(self, path, mode):
@@ -132,18 +120,32 @@ class Passthrough(Operations):
     # File methods
     # ============
 
-    # Mirror filesystem starts with .scaled.width.height , eg .scaled.600x800 . if either is blank, use the other one and scale uniformly
+
     def open(self, path, flags):
         full_path = self._full_path(path)
         width=800
         height=600
-        print(os.path.splitext(full_path)[1].lower())
-        if (self._isscalepath(path) and os.path.isfile(full_path) and os.path.splitext(full_path)[1].lower() in self.imageformats):
-            print(full_path + " is an imagei to be scaled")
+        objkey=(full_path+":"+str(width)+":"+str(height)).replace(" ","+")
+        fhkey=("fh"+full_path+":"+str(width)+":"+str(height)).replace(" ","+")
+        imagebytearray=memcacheclient.get(key)
+        fh=memcacheclient.get(fhkey)
+        if imagebytearray is None:
+            print(" -- UNCACHED "+key)
+            if (os.path.isfile(full_path) and os.path.splitext(full_path)[1].lower() in self.imageformats):
+                print(full_path + " is an image to be scaled")
 
-            img=Image.open(full_path)
-            img.resize((width,height),PIL.Image.LANCZOS).save("/tmp/.scaled."+str(width)+"x"+str(height)+"test.jpg",quality=50)
-        return os.open(full_path, flags)
+                img=Image.open(full_path)
+                newimage=img.resize((width,height),PIL.Image.LANCZOS)
+                ## https://stackoverflow.com/questions/33101935/convert-pil-image-to-byte-array
+                ## https://stackoverflow.com/questions/42800250/difference-between-open-and-io-bytesio-in-binary-streams
+                ## https://docs.python.org/3/library/io.html
+                imageIO=self.image_to_byte_array(newimage)
+                imagebytearray=imageIo.getvalue()
+                memcacheclient.set(key,imagebytearray)
+        else:
+            print(" -- CACHE HIT")
+            imageIO=io.BytesIO(imagebytearray)
+        return imageIO
 
     def create(self, path, mode, fi=None):
         raise FuseOSError(errno.EROFS)
@@ -175,10 +177,10 @@ class Passthrough(Operations):
         return self.flush(path, fh)
 
 
-def main(mountpoint, root):
+def main(mountpoint, root, maxwidth, maxheight):
     FUSE(Passthrough(root), mountpoint, nothreads=True, foreground=True)
 
 if __name__ == '__main__':
-    if (len(sys.argv) != 3):
-        sys.exit("Usage: "+sys.argv[0]+" targetfolder mountpoint")
-    main(sys.argv[2], sys.argv[1])
+    if (len(sys.argv) != 5):
+        sys.exit("Usage: "+sys.argv[0]+" targetfolder mountpoint maxwidth maxheight")
+    main(sys.argv[2], sys.argv[1], sys.argv[3], sys.argv[4])
