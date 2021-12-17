@@ -30,6 +30,7 @@ class Passthrough(Operations):
     def debug(self,log,prio=1):
         if prio==loglevel:
             print(str(log)[0], end="")
+            sys.stdout.flush()
         if prio>loglevel:
             print(log)
 
