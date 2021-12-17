@@ -16,7 +16,7 @@ from pymemcache.client import base
 from random import randrange
 
 memcacheclient = base.Client(('127.0.0.1', 11211))
-
+loglevel=1
 
 
 class Passthrough(Operations):
@@ -26,6 +26,12 @@ class Passthrough(Operations):
 
     # Helpers
     # =======
+
+    def debug(self,log,prio=1):
+        if prio==loglevel:
+            print(str(log)[0], end="")
+        if prio>loglevel:
+            print(log)
 
     def _full_path(self, partial):
         partial = partial.lstrip("/")
@@ -73,7 +79,6 @@ class Passthrough(Operations):
         dirents = ['.', '..']
         if os.path.isdir(full_path):
             dirlist=os.listdir(full_path)
-            print (dirlist)
             for entry in dirlist:
                 if os.path.splitext(entry)[1].lower() in self.imageformats or os.path.isdir(full_path+"/"+entry):
                     dirents.append(entry)
@@ -140,9 +145,9 @@ class Passthrough(Operations):
         imagebytearray=memcacheclient.get(objkey)
 
         if imagebytearray is None:
-            print(" -- UNCACHED "+objkey)
+            self.debug("MISS CACHED "+objkey)
             if (os.path.isfile(full_path) and os.path.splitext(full_path)[1].lower() in self.imageformats):
-                print(full_path + " is an image to be scaled")
+                self.debug("Scaling image "+full_path)
 
                 img=Image.open(full_path)
                 newimage=img.resize((width,height),PIL.Image.LANCZOS)
@@ -154,7 +159,7 @@ class Passthrough(Operations):
                 imagebytearray=imageIO.getvalue()
                 memcacheclient.set(objkey,imagebytearray)
         else:
-            print(" -- CACHE HIT")
+            self.debug("HIT CACHE")
         return randrange(1,1000000)
 
     def create(self, path, mode, fi=None):
@@ -163,7 +168,7 @@ class Passthrough(Operations):
         return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
 
     def read(self, path, length, offset, fh):
-        print(fh)
+        self.debug(fh)
         imagebytearray=memcacheclient.get(path.replace(" ","+"))
         return imagebytearray[offset:(offset+length)]
 
