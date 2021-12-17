@@ -22,7 +22,7 @@ memcacheclient = base.Client(('127.0.0.1', 11211))
 class Passthrough(Operations):
     def __init__(self, root):
         self.root = root
-        self.imageformats = [".jpg",".jpeg"]
+        self.imageformats = [".jpg",".jpeg",".png"]
 
     # Helpers
     # =======
@@ -32,10 +32,14 @@ class Passthrough(Operations):
         path = os.path.join(self.root, partial)
         return path
 
-    def image_to_byte_array(self,image:Image):
+    def image_to_byte_array(self,image:Image,full_path):
+      fmt=os.path.splitext(full_path)[1].lower().lstrip(".")
+      if fmt=="jpg":
+          fmt="jpeg"
       imgByteArr = io.BytesIO()
-      # image.save(imgByteArr, format=image.format)
-      image.save(imgByteArr, format='jpeg')
+      image.save(imgByteArr, format=fmt)
+      #image.save(imgByteArr, format=image.format)
+      #image.save(imgByteArr, format='jpeg')
       #imgByteArr = imgByteArr.getvalue()
       return imgByteArr
 
@@ -68,7 +72,12 @@ class Passthrough(Operations):
 
         dirents = ['.', '..']
         if os.path.isdir(full_path):
-            dirents.extend(os.listdir(full_path))
+            dirlist=os.listdir(full_path)
+            print (dirlist)
+            for entry in dirlist:
+                if os.path.splitext(entry)[1].lower() in self.imageformats or os.path.isdir(full_path+"/"+entry):
+                    dirents.append(entry)
+
         for r in dirents:
             yield r
 
@@ -126,7 +135,7 @@ class Passthrough(Operations):
         full_path = self._full_path(path)
         width=640
         height=480
-        objkey=path # +":"+str(width)+":"+str(height)).replace(" ","+")
+        objkey=path.replace(" ","+") # +":"+str(width)+":"+str(height)).replace(" ","+")
 
         imagebytearray=memcacheclient.get(objkey)
 
@@ -137,10 +146,11 @@ class Passthrough(Operations):
 
                 img=Image.open(full_path)
                 newimage=img.resize((width,height),PIL.Image.LANCZOS)
+                #newimage=img.thumbnail((width,height),PIL.Image.LANCZOS)
                 ## https://stackoverflow.com/questions/33101935/convert-pil-image-to-byte-array
                 ## https://stackoverflow.com/questions/42800250/difference-between-open-and-io-bytesio-in-binary-streams
                 ## https://docs.python.org/3/library/io.html
-                imageIO=self.image_to_byte_array(newimage)
+                imageIO=self.image_to_byte_array(newimage,full_path)
                 imagebytearray=imageIO.getvalue()
                 memcacheclient.set(objkey,imagebytearray)
         else:
@@ -154,7 +164,7 @@ class Passthrough(Operations):
 
     def read(self, path, length, offset, fh):
         print(fh)
-        imagebytearray=memcacheclient.get(path)
+        imagebytearray=memcacheclient.get(path.replace(" ","+"))
         return imagebytearray[offset:(offset+length)]
 
     #    fh2 = io.BytesIO(imagebytearray)
