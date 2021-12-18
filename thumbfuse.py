@@ -16,7 +16,7 @@ from pymemcache.client import base
 from random import randrange
 
 memcacheclient = base.Client(('127.0.0.1', 11211))
-loglevel=1
+loglevel=0
 
 
 class Passthrough(Operations):
@@ -137,11 +137,14 @@ class Passthrough(Operations):
     # ============
 
 
+    def getkey(self,path):
+        return path.replace(" ","+") # +":"+str(width)+":"+str(height)).replace(" ","+")
+
     def open(self, path, flags):
         full_path = self._full_path(path)
         width=640
         height=480
-        objkey=path.replace(" ","+") # +":"+str(width)+":"+str(height)).replace(" ","+")
+        objkey=self.getkey(path)
 
         imagebytearray=memcacheclient.get(objkey)
 
@@ -170,7 +173,8 @@ class Passthrough(Operations):
 
     def read(self, path, length, offset, fh):
         self.debug(fh)
-        imagebytearray=memcacheclient.get(path.replace(" ","+"))
+        objkey=self.getkey(path)
+        imagebytearray=memcacheclient.get(objkey)
         return imagebytearray[offset:(offset+length)]
 
     #    fh2 = io.BytesIO(imagebytearray)
@@ -183,18 +187,25 @@ class Passthrough(Operations):
         os.lseek(fh, offset, os.SEEK_SET)
         return os.write(fh, buf)
 
+    ## truncate - invalidate cache entry for this file (ie, force regeneration of thumbnail)
     def truncate(self, path, length, fh=None):
-        raise FuseOSError(errno.EROFS)
-        full_path = self._full_path(path)
-        with open(full_path, 'r+') as f:
-            f.truncate(length)
+        self.debug("truncate (cache invalidate) "+path);
+        objkey=self.getkey(path)
+        memcacheclient.delete(objkey)
+        #raise FuseOSError(errno.EROFS)
+        #full_path = self._full_path(path)
+        #with open(full_path, 'r+') as f:
+        #    f.truncate(length)
 
     def flush(self, path, fh):
-        return os.fsync(fh)
+        self.debug("flush "+path);
+        return 0
+        #return os.fsync(fh)
 
     def release(self, path, fh):
+        self.debug("release "+path);
         return 0
-        return os.close(fh)
+        #return os.close(fh)
 
     def fsync(self, path, fdatasync, fh):
         return self.flush(path, fh)
